@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- No managed assembly: the package ships a native static library and the
+         bflat manifest that describes it. NU5128 is the "no lib/ folder for the
+         target framework" warning, which is expected here. -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <NoBuild>true</NoBuild>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Description>SP1 zkVM accelerators for the Nethermind guest for SP1</Description>
+    <EmbedUntrackedSources>false</EmbedUntrackedSources>
+    <IncludeSymbols>false</IncludeSymbols>
+    <PackageId>Nethermind.Sp1.Runtime</PackageId>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://nethermind.io</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>sp1;zkvm;riscv64</PackageTags>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/nethermindeth/bflat-sp1</RepositoryUrl>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Update="runtimes/linux-riscv64/native/libsp1.a">
+      <Pack>true</Pack>
+      <PackagePath>%(RelativeDir)%(Filename)%(Extension)</PackagePath>
+    </None>
+    <None Update="libsp1.bflat.manifest">
+      <Pack>true</Pack>
+      <PackagePath>runtimes/linux-riscv64/native/%(Filename)%(Extension)</PackagePath>
+    </None>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+</Project>

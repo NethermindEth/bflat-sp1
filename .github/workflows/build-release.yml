@@ -1,0 +1,195 @@
+name: Build and publish NuGet package
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish to NuGet
+        default: "No"
+        type: choice
+        options:
+          - "No"
+          - Staging
+          - Production
+      sp1_ref:
+        description: SP1 release the zkEVM SDK is taken from
+        type: string
+        default: v6.5.0
+
+env:
+  # Also the default for push/PR runs, where inputs are empty.
+  SP1_REF: ${{ inputs.sp1_ref || 'v6.5.0' }}
+
+jobs:
+  build-libsp1:
+    name: Build libsp1
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install RISC-V binutils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y binutils-riscv64-linux-gnu
+
+      - name: Build static library
+        run: ./build/build.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify the accelerator surface
+        run: |
+          # Every symbol Nethermind.Zkvm.Abstractions imports must be present and
+          # global, and none of SP1's runtime entry points may have leaked in as
+          # a global - they collide with the guest's own _start/exit/memcpy.
+          NM=riscv64-linux-gnu-nm
+          missing=0
+          for sym in zkvm_keccak256 zkvm_sha256 zkvm_ripemd160 zkvm_blake2f \
+                     zkvm_modexp zkvm_secp256k1_ecrecover zkvm_secp256k1_verify \
+                     zkvm_secp256r1_verify zkvm_bn254_g1_add zkvm_bn254_g1_mul \
+                     zkvm_bn254_pairing zkvm_bls12_g1_add zkvm_bls12_g1_msm \
+                     zkvm_bls12_g2_add zkvm_bls12_g2_msm zkvm_bls12_pairing \
+                     zkvm_bls12_map_fp_to_g1 zkvm_bls12_map_fp2_to_g2 \
+                     zkvm_kzg_point_eval read_input write_output ; do
+            if ! $NM --defined-only output/libsp1.a 2>/dev/null | grep -q " T $sym$" ; then
+              echo "MISSING: $sym"; missing=$((missing + 1))
+            fi
+          done
+          leaked=$($NM --defined-only output/libsp1.a 2>/dev/null | grep " T " \
+                   | awk '{print $3}' | grep -xE '_start|exit|_exit|abort|__assert_fail|memcpy' || true)
+          if [ -n "$leaked" ] ; then
+            echo "LEAKED AS GLOBAL: $leaked"; missing=$((missing + 1))
+          fi
+          [ "$missing" = "0" ] || { echo "accelerator surface check failed"; exit 1; }
+          echo "accelerator surface OK"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: libsp1
+          path: |
+            output/libsp1.a
+            output/libsp1.bflat.manifest
+          if-no-files-found: error
+
+  build-nupkg:
+    name: Build NuGet package
+    needs: build-libsp1
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NUGET_HOST: ${{ inputs.publish == 'Staging' && 'https://int.nugettest.org' || 'https://www.nuget.org' }}
+    outputs:
+      version: ${{ steps.pkg.outputs.version }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+
+      - name: Download libsp1 artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: libsp1
+
+      - name: Move artifacts into the package project
+        run: |
+          mkdir -p src/runtime/runtimes/linux-riscv64/native
+          mv libsp1.a src/runtime/runtimes/linux-riscv64/native/
+          mv libsp1.bflat.manifest src/runtime/
+
+      - name: Inject sp1_ref and package_version into the manifest
+        run: |
+          PREFIX=$(grep -oP '(?<=<VersionPrefix>)[^<]+' src/runtime/Directory.Build.props | tr -d '[:space:]')
+          SUFFIX=$(grep -oP '(?<=<VersionSuffix>)[^<]+' src/runtime/Directory.Build.props | tr -d '[:space:]')
+          VERSION="$PREFIX${SUFFIX:+-$SUFFIX}"
+
+          MANIFEST=src/runtime/libsp1.bflat.manifest
+          jq --arg ref "$SP1_REF" --arg version "$VERSION" \
+            '. + {sp1_ref: $ref, package_version: $version}' \
+            "$MANIFEST" > "$MANIFEST.tmp"
+          mv "$MANIFEST.tmp" "$MANIFEST"
+
+      - name: Pack
+        working-directory: src/runtime
+        run: dotnet pack Nethermind.Sp1.Runtime.csproj -c release
+
+      - name: Get package version
+        id: pkg
+        working-directory: src/runtime
+        run: |
+          PKG=$(ls ./artifacts/package/release/*.nupkg | head -1)
+          VERSION=$(basename "$PKG" .nupkg | sed 's/^Nethermind\.Sp1\.Runtime\.//')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: NuGet login
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != 'No'
+        uses: nuget/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }}
+          audience: ${{ env.NUGET_HOST }}
+          token-service-url: ${{ env.NUGET_HOST }}/api/v2/token
+
+      - name: Publish NuGet package
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != 'No'
+        working-directory: src/runtime
+        run: |
+          dotnet nuget push ./artifacts/package/release/*.nupkg \
+            -k "${{ steps.login.outputs.NUGET_API_KEY }}" -s ${{ env.NUGET_HOST }}/api/v2/package
+
+      - name: Upload nupkg artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: nupkg
+          path: src/runtime/artifacts/package/release/*.nupkg
+          if-no-files-found: error
+
+  publish-nupkg-github:
+    name: Publish to GitHub
+    if: github.event_name == 'workflow_dispatch' && inputs.publish != 'No'
+    needs: build-nupkg
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download nupkg artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: nupkg
+          path: nupkg
+
+      - name: Download libsp1 artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: libsp1
+          path: libsp1
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.build-nupkg.outputs.version }}
+          name: Nethermind.Sp1.Runtime ${{ needs.build-nupkg.outputs.version }}
+          files: |
+            nupkg/*.nupkg
+            libsp1/libsp1.a
+            libsp1/libsp1.bflat.manifest
+          body: |
+            SP1 zkVM accelerators for bflat guests.
+
+            **Package**: `Nethermind.Sp1.Runtime`
+            **Version**: `${{ needs.build-nupkg.outputs.version }}`
+
+            Built from the SP1 zkEVM SDK of release `${{ env.SP1_REF }}`.
+          draft: false
+          prerelease: ${{ contains(needs.build-nupkg.outputs.version, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,12 @@
+{
+  "name": "libsp1",
+  "package_version": "1.0.0",
+  "builds": [
+    {
+      "arch": "riscv64",
+      "os": "linux",
+      "libc": "sp1",
+      "static_lib": "libsp1.a"
+    }
+  ]
+}
