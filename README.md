@@ -1,4 +1,6 @@
-# bflat-libsp1
+# bflat-sp1
+
+[![Nethermind.Sp1.Runtime](https://img.shields.io/nuget/v/Nethermind.Sp1.Runtime)](https://www.nuget.org/packages/Nethermind.Sp1.Runtime)
 
 SP1 bindings for [bflat-riscv64](https://github.com/NethermindEth/bflat-riscv64)
 guests built with `--libc sp1`, providing the native half of
@@ -28,7 +30,21 @@ Managed code then calls the accelerators through `Nethermind.Zkvm.Abstractions`,
 whose `[LibraryImport("__Internal")]` declarations bind to these symbols
 statically.
 
-## Building
+## Packaging
+
+`src/runtime` packs the static library and its manifest into
+`Nethermind.Sp1.Runtime`, which is what a guest consumes:
+
+```console
+$ bflat build app.cs --os linux --arch riscv64 --libc sp1 \
+      --extlib Nethermind.Sp1.Runtime
+```
+
+`.github/workflows/build-release.yml` builds the library, checks the exported
+symbol surface, packs the nupkg on every push, and publishes to NuGet plus cuts
+a GitHub release when run manually with `publish` set to Staging or Production.
+
+## Building locally
 
 ```console
 $ ./build/build.sh
