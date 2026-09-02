@@ -7,6 +7,10 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      bflat_ref:
+        description: bflat-riscv64 ref to build the linker against
+        default: feature/new_zkvms
+        type: string
       publish:
         description: Publish to NuGet
         default: "No"
@@ -76,6 +80,99 @@ jobs:
             output/libsp1.a
             output/libsp1.bflat.manifest
           if-no-files-found: error
+
+  link-guest:
+    # The surface check above proves the symbols exist. This proves they LINK:
+    # a real bflat guest, built for --libc sp1 against the real linker script,
+    # calling all 21 entry points through direct P/Invoke. libzkevm ships a
+    # whole guest runtime alongside the accelerators - its own entry point,
+    # allocator and libc shims - and which of those collide with bflat's is
+    # exactly what no amount of nm-ing the archive can tell you.
+    name: Link a real bflat guest
+    needs: build-libsp1
+    runs-on: ubuntu-latest
+    container:
+      image: ubuntu:26.04
+    steps:
+      - name: Install the toolchain
+        run: |
+          apt-get update
+          apt-get install -y git gcc-riscv64-linux-gnu g++-riscv64-linux-gnu \
+                             binutils-riscv64-linux-gnu llvm clang lld xxd \
+                             python3 python3-pip wget curl ca-certificates yq libicu-dev
+          pip3 install lief pyelftools --break-system-packages
+          # The riscv64 cross-gcc ships only hard-float (lp64d) glibc stubs;
+          # bflat's native modules are compiled -mabi=lp64.
+          touch /usr/riscv64-linux-gnu/include/gnu/stubs-lp64.h
+
+      - name: Install .NET
+        run: |
+          wget -q https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
+          chmod +x dotnet-install.sh
+          ./dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet
+          ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
+          echo "DOTNET_ROOT=/usr/share/dotnet" >> $GITHUB_ENV
+          echo "/usr/share/dotnet" >> $GITHUB_PATH
+
+      - name: Check out this repository
+        uses: actions/checkout@v4
+        with:
+          path: bflat-sp1
+
+      - name: Check out bflat-riscv64
+        uses: actions/checkout@v4
+        with:
+          repository: NethermindEth/bflat-riscv64
+          ref: ${{ inputs.bflat_ref || 'feature/new_zkvms' }}
+          path: bflat-riscv64
+
+      - name: Download the libsp1 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: libsp1
+          path: bflat-sp1/output
+
+      - name: Build bflat and its native modules
+        working-directory: bflat-riscv64
+        # The modules leg is what produces lib/linux/riscv64/sp1/{script.ld,
+        # entrypoint.o} - the memory map this test is here to link against.
+        run: |
+          ./build.sh modules riscv64 perf 10
+          ./build.sh bflat riscv64 perf 10
+
+      - name: Link the guest against libsp1
+        run: |
+          set -e
+          bflat-riscv64/src/bflat/bin/Debug/net10.0/bflat build \
+            bflat-sp1/tests/integration/guest.cs \
+            --os linux --arch riscv64 --libc sp1 --stdlib dotnet \
+            --no-pie --no-pthread -Ot \
+            --extlib "$PWD/bflat-sp1/output/libsp1.bflat.manifest" \
+            -o guest
+          riscv64-linux-gnu-readelf -h guest | grep -E 'Class:|Machine:|Entry point'
+          ls -la guest
+
+      - name: Check the image against SP1's loader rules
+        run: |
+          # Every PT_LOAD at or above STACK_TOP = 0x78000000, none both
+          # writable and executable, and no segment without PF_R - SP1's
+          # loader rejects each of those outright.
+          riscv64-linux-gnu-readelf -lW guest | awk '/^  LOAD/ { print $3, $8 }' > segs.txt
+          cat segs.txt
+          python3 - <<'PY'
+          bad = []
+          for line in open("segs.txt"):
+              vaddr, flags = line.split()
+              v = int(vaddr, 16)
+              if v < 0x78000000:
+                  bad.append(f"{vaddr}: below STACK_TOP")
+              if "R" not in flags:
+                  bad.append(f"{vaddr}: not readable ({flags})")
+              if "W" in flags and "E" in flags:
+                  bad.append(f"{vaddr}: writable and executable ({flags})")
+          assert not bad, bad
+          print("segments satisfy SP1's loader rules")
+          PY
 
   build-nupkg:
     name: Build NuGet package
