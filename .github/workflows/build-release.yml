@@ -92,7 +92,10 @@ jobs:
     needs: build-libsp1
     runs-on: ubuntu-latest
     container:
-      image: ubuntu:26.04
+      # 24.04, not 26.04: bflat's bundled lld is linked against ICU 74, and
+      # 26.04 ships 78 with no compatible soname. bflat-riscv64's own CI does
+      # not hit this because it runs bflat from its packaged Docker image.
+      image: ubuntu:24.04
     steps:
       - name: Install the toolchain
         run: |
