@@ -155,27 +155,13 @@ jobs:
           riscv64-linux-gnu-readelf -h guest | grep -E 'Class:|Machine:|Entry point'
           ls -la guest
 
-      - name: Check the image against SP1's loader rules
+      - name: Check the linked image
+        # SP1 transpiles every executable word up front and panics on one it
+        # cannot decode, so an A-extension instruction anywhere in .text is a
+        # hard load failure, not a latent one. Reported, not yet fatal: they
+        # come from the prebuilt musl, not from this package.
         run: |
-          # Every PT_LOAD at or above STACK_TOP = 0x78000000, none both
-          # writable and executable, and no segment without PF_R - SP1's
-          # loader rejects each of those outright.
-          riscv64-linux-gnu-readelf -lW guest | awk '/^  LOAD/ { print $3, $8 }' > segs.txt
-          cat segs.txt
-          python3 - <<'PY'
-          bad = []
-          for line in open("segs.txt"):
-              vaddr, flags = line.split()
-              v = int(vaddr, 16)
-              if v < 0x78000000:
-                  bad.append(f"{vaddr}: below STACK_TOP")
-              if "R" not in flags:
-                  bad.append(f"{vaddr}: not readable ({flags})")
-              if "W" in flags and "E" in flags:
-                  bad.append(f"{vaddr}: writable and executable ({flags})")
-          assert not bad, bad
-          print("segments satisfy SP1's loader rules")
-          PY
+          python3 bflat-sp1/tests/integration/check_image.py guest --sp1-segments
 
   build-nupkg:
     name: Build NuGet package
