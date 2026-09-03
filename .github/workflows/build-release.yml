@@ -165,11 +165,12 @@ jobs:
 
       - name: Check the linked image
         # SP1 transpiles every executable word up front and panics on one it
-        # cannot decode, so an A-extension instruction anywhere in .text is a
-        # hard load failure, not a latent one. Reported, not yet fatal: they
-        # come from the prebuilt musl, not from this package.
+        # cannot decode, so an A-extension instruction anywhere in .text means
+        # the guest does not load at all. bflat's nothread module displaces the
+        # musl primitives that used to leave 128 of them in the image; this
+        # keeps them out.
         run: |
-          python3 bflat-sp1/tests/integration/check_image.py guest --sp1-segments
+          python3 bflat-sp1/tests/integration/check_image.py guest --sp1-segments --no-atomics
 
   build-nupkg:
     name: Build NuGet package
