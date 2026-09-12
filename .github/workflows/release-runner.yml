@@ -1,0 +1,72 @@
+# Publishes the SP1 execution harness as a container image.
+#
+# SP1 ships no image that executes an arbitrary ELF - ghcr.io/succinctlabs/sp1
+# is the toolchain for BUILDING guests - so anything that wants to RUN a bflat
+# guest has to compile a harness from the SDK, roughly fifteen minutes a go.
+# This publishes it once.
+#
+# The tag is the SP1 release, and it must match SP1_REF in build-release.yml:
+# the guest's syscall ids and public-values protocol come from the same SDK, so
+# a runner on a different tag would be testing a different contract.
+#
+# Manual only. After publishing, pin the new digest in the consumers
+# (nethermind's Nethermind.Stateless.Sp1Guest/Makefile, SP1_IMAGE).
+name: Release SP1 runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      sp1_ref:
+        description: SP1 release to build the harness against (tag = image tag)
+        type: string
+        default: v6.5.0
+      push:
+        description: Push to Docker Hub (off = build only, to check it compiles)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  runner:
+    name: sp1-runner
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Pin the SDK to the requested release
+        working-directory: runner
+        run: |
+          set -euo pipefail
+          sed -i "s|tag = \"[^\"]*\"|tag = \"${{ inputs.sp1_ref }}\"|" Cargo.toml
+          grep 'sp1-sdk' Cargo.toml
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: inputs.push
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: runner
+          push: ${{ inputs.push }}
+          tags: nethermindeth/sp1-runner:${{ inputs.sp1_ref }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Report the digest to pin
+        if: inputs.push
+        run: |
+          echo "### Pin this in the consumers" >> "$GITHUB_STEP_SUMMARY"
+          echo '```make' >> "$GITHUB_STEP_SUMMARY"
+          echo "SP1_IMAGE ?= nethermindeth/sp1-runner:${{ inputs.sp1_ref }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

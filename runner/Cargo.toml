@@ -1,0 +1,17 @@
+# Execution harness for a bflat-built SP1 guest.
+#
+# The SP1 tag is the one build/build.sh takes the zkEVM SDK from: the guest's
+# syscall ids, memory map and public-values protocol are written against it, so
+# runner and bindings move together or not at all.
+[workspace]
+
+[package]
+name = "sp1runner"
+version = "0.0.0"
+edition = "2021"
+
+[dependencies]
+sp1-sdk = { git = "https://github.com/succinctlabs/sp1", tag = "v6.5.0", features = ["blocking"] }
+
+[profile.release]
+opt-level = 3
