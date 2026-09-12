@@ -8,7 +8,7 @@
 # would each have to compile a harness from source, ~15 minutes a run. They
 # pull this instead.
 #
-#   docker run --rm --shm-size=8g -v "$PWD:/n" nethermindeth/sp1-runner:v6.5.0 \
+#   docker run --rm --shm-size=8g -v "$PWD:/n" ghcr.io/nethermindeth/sp1-runner:v6.5.0 \
 #       /n/nethermind /n/input.raw [expected-hex]
 #
 # The input is RAW SSZ. The .ssz files in the test bucket are ZisK-framed (a
