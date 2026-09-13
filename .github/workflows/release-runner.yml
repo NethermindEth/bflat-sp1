@@ -9,12 +9,11 @@
 # the guest's syscall ids and public-values protocol come from the same SDK, so
 # a runner on a different tag would be testing a different contract.
 #
-# Published to GHCR, not Docker Hub: this repository has no Docker Hub
-# credentials (only NUGET_USER), and GHCR takes the workflow's own GITHUB_TOKEN,
-# so publishing needs nothing provisioned. The package inherits the repository's
-# visibility on first push - if the repo is private, flip the package to public
-# once under Packages -> sp1-runner -> Package settings, or consumers cannot
-# pull it.
+# Published to Docker Hub, alongside the other images the guests use
+# (nethermindeth/zisk, nethermindeth/bflat-riscv64). Needs DOCKER_HUB_USERNAME
+# and DOCKER_HUB_PASSWORD in this repository or granted to it from the org; the
+# preflight step below says so plainly instead of letting the login step fail
+# with a bare "Username and password required".
 #
 # Manual only. After publishing, pin the new digest in the consumers
 # (nethermind's Nethermind.Stateless.Sp1Guest/Makefile, SP1_IMAGE).
@@ -28,13 +27,12 @@ on:
         type: string
         default: v6.5.0
       push:
-        description: Push to GHCR (off = build only, to check it compiles)
+        description: Push to Docker Hub (off = build only, to check it compiles)
         type: boolean
         default: false
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   runner:
@@ -54,13 +52,23 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR
+      - name: Check the Docker Hub credentials are present
+        if: inputs.push
+        env:
+          USERNAME: ${{ secrets.DOCKER_HUB_USERNAME }}
+          PASSWORD: ${{ secrets.DOCKER_HUB_PASSWORD }}
+        run: |
+          [ -n "$USERNAME" ] && [ -n "$PASSWORD" ] || {
+            echo "::error::DOCKER_HUB_USERNAME / DOCKER_HUB_PASSWORD are not set for this repository. Add them, or run with push off to build only."
+            exit 1
+          }
+
+      - name: Log in to Docker Hub
         if: inputs.push
         uses: docker/login-action@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.DOCKER_HUB_USERNAME }}
+          password: ${{ secrets.DOCKER_HUB_PASSWORD }}
 
       - name: Build and push
         id: build
@@ -68,7 +76,7 @@ jobs:
         with:
           context: runner
           push: ${{ inputs.push }}
-          tags: ghcr.io/nethermindeth/sp1-runner:${{ inputs.sp1_ref }}
+          tags: nethermindeth/sp1-runner:${{ inputs.sp1_ref }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -77,5 +85,5 @@ jobs:
         run: |
           echo "### Pin this in the consumers" >> "$GITHUB_STEP_SUMMARY"
           echo '```make' >> "$GITHUB_STEP_SUMMARY"
-          echo "SP1_IMAGE ?= ghcr.io/nethermindeth/sp1-runner:${{ inputs.sp1_ref }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "SP1_IMAGE ?= nethermindeth/sp1-runner:${{ inputs.sp1_ref }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
