@@ -14,11 +14,27 @@ fn main() {
     stdin.write_vec(input);
 
     let client = ProverClient::builder().cpu().build();
-    let (public_values, report) = client.execute(elf, stdin).run().expect("execute");
+    let (public_values, report) = match client.execute(elf, stdin).run() {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("execute failed: {e}");
+            std::process::exit(1);
+        }
+    };
 
     let got = hex(public_values.as_slice());
     println!("cycles {}", report.total_instruction_count());
+    println!("exit_code {}", report.exit_code);
     println!("output {}", got);
+
+    // A guest that halts non-zero is a failed run, and SP1 does NOT report that
+    // as an execution error - it completes normally and leaves the code in the
+    // report. Without this, every failure of the guest (including the trap
+    // modules' 253/254/255) looked like a pass to the caller.
+    if report.exit_code != 0 {
+        eprintln!("guest halted with exit code {}", report.exit_code);
+        std::process::exit(1);
+    }
 
     if let Some(want) = expected {
         if got != want {

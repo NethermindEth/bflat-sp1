@@ -23,7 +23,10 @@
 # that import google/protobuf/empty.proto, and those well-known definitions ship
 # in libprotobuf-dev. Without it the build dies in a build script with
 # "File not found" rather than anything that names the missing package.
+# PORTABLE=1 builds the variant whose executor prints the guest's console
+# output (see runner/Cargo.toml). Slower, and published under its own tag.
 FROM rust:1.91-bookworm AS build
+ARG PORTABLE=
 WORKDIR /src
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -32,7 +35,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml ./
 COPY src ./src
-RUN cargo build --release
+RUN cargo build --release ${PORTABLE:+--features portable}
 
 FROM debian:bookworm-slim
 RUN apt-get update \

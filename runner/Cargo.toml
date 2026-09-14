@@ -13,5 +13,18 @@ edition = "2021"
 [dependencies]
 sp1-sdk = { git = "https://github.com/succinctlabs/sp1", tag = "v6.5.0", features = ["blocking"] }
 
+[features]
+# SP1 picks its executor at BUILD time (crates/core/executor/src/build.rs): on
+# x86_64 Linux it uses the native JIT unless `profiling` or `mprotect` is on,
+# in which case it falls back to the portable one.
+#
+# That choice decides whether the guest's console output is visible. The
+# portable executor prints fd 1 and 2 as "stdout: <line>" / "stderr: <line>";
+# the native one runs the guest in a child process whose stderr does not reach
+# the caller, so guest writes vanish. The native executor is roughly an order
+# of magnitude faster, so it stays the default and this feature builds the
+# variant that can be watched.
+portable = ["sp1-sdk/profiling"]
+
 [profile.release]
 opt-level = 3
