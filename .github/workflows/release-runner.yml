@@ -26,6 +26,12 @@ on:
         description: SP1 release to build the harness against (tag = image tag)
         type: string
         default: v6.5.0
+      portable:
+        description: >-
+          Build the portable-executor variant (tag suffix -portable). Slower,
+          but it surfaces the guest's console output and needs no /dev/shm.
+        type: boolean
+        default: false
       push:
         description: Push to Docker Hub (off = build only, to check it compiles)
         type: boolean
@@ -75,8 +81,9 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: runner
+          build-args: PORTABLE=${{ inputs.portable && '1' || '' }}
           push: ${{ inputs.push }}
-          tags: nethermindeth/sp1-runner:${{ inputs.sp1_ref }}
+          tags: nethermindeth/sp1-runner:${{ inputs.sp1_ref }}${{ inputs.portable && '-portable' || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -85,5 +92,5 @@ jobs:
         run: |
           echo "### Pin this in the consumers" >> "$GITHUB_STEP_SUMMARY"
           echo '```make' >> "$GITHUB_STEP_SUMMARY"
-          echo "SP1_IMAGE ?= nethermindeth/sp1-runner:${{ inputs.sp1_ref }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "SP1_IMAGE ?= nethermindeth/sp1-runner:${{ inputs.sp1_ref }}${{ inputs.portable && '-portable' || '' }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
