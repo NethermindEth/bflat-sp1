@@ -8,14 +8,19 @@ guests built with `--libc sp1`, providing the native half of
 
 ## What this is
 
-`libsp1.a` — two layers in one archive:
+`libsp1.a` — three layers in one archive:
 
 1. **SP1's own zkEVM SDK.** SP1 ships a complete implementation of the
    [eth-act zkVM accelerator standard](https://github.com/eth-act/zkvm-standards)
    (sources under `sp1/zkevm/`, published as the `zkevm-sdk-<version>.tar.gz`
-   release asset). All 19 accelerator entry points plus `read_input` /
-   `write_output` come straight from there — we do not reimplement any of it.
-2. **Raw precompile shims** (`src/sp1_syscalls`) — one three-instruction leaf
+   release asset). 18 of the 19 accelerator entry points plus `read_input` /
+   `write_output` come straight from there.
+2. **`zkvm_secp256k1_ecrecover`** (`src/secp256k1`) — replaces the SDK's,
+   which spends ~512 point doublings and ~256 additions per recovery. This one
+   uses GLV and wNAF for ~128 and ~78, with identical results; every
+   transaction sender goes through it. Tested on the host against a Python
+   reference (`tests/secp256k1`) and on SP1 itself in CI.
+3. **Raw precompile shims** (`src/sp1_syscalls`) — one three-instruction leaf
    per SP1 syscall, for anything the standard does not cover or that managed
    code wants to reach directly.
 
@@ -50,7 +55,7 @@ a GitHub release when run manually with `publish` set to Staging or Production.
 $ ./build/build.sh
 ```
 
-Needs `binutils-riscv64-linux-gnu` and `gh` (to fetch the SDK release; drop the
+Needs `binutils-riscv64-linux-gnu`, `gcc-riscv64-linux-gnu` and `gh` (to fetch the SDK release; drop the
 tarball into `tmp/` by hand to build offline). `SP1_REF` selects the SP1
 release, default `v6.5.0`. Output lands in `output/`.
 

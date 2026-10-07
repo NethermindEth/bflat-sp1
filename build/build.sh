@@ -1,14 +1,16 @@
 #!/bin/bash
 # Builds libsp1.a - the native half of the SP1 bindings for bflat guests.
 #
-# There is nothing to compile. SP1 ships a complete implementation of the
-# eth-act zkVM accelerator standard as `libzkevm.a` (sources in sp1/zkevm/,
-# published as the `zkevm-sdk-<version>.tar.gz` release asset), so this script
-# fetches that archive and repackages it:
+# SP1 ships a complete implementation of the eth-act zkVM accelerator standard
+# as `libzkevm.a` (sources in sp1/zkevm/, published as the
+# `zkevm-sdk-<version>.tar.gz` release asset), so this script fetches that
+# archive and repackages it:
 #
-#   1. the SP1 SDK archive, with its runtime entry points made local, and
+#   1. the SP1 SDK archive, with its runtime entry points made local,
 #   2. sp1_syscalls.o - raw precompile shims for anything the standard does not
-#      cover, callable straight from managed code.
+#      cover, callable straight from managed code, and
+#   3. secp256k1_ecrecover.o - zkvm_secp256k1_ecrecover, replacing the SDK's
+#      (see src/secp256k1/ecrecover.c for why), whose copy is made local.
 #
 # WHY THE SYMBOLS ARE LOCALIZED. Rust emits one codegen unit per crate, so a
 # single member of libzkevm.a defines the accelerators AND `_start`, `exit`,
@@ -33,12 +35,13 @@ SP1_REF="${SP1_REF:-v6.5.0}"
 SP1_REPO="${SP1_REPO:-succinctlabs/sp1}"
 
 AS="${AS:-riscv64-linux-gnu-as}"
+CC="${CC:-riscv64-linux-gnu-gcc}"
 AR="${AR:-riscv64-linux-gnu-ar}"
 RANLIB="${RANLIB:-riscv64-linux-gnu-ranlib}"
 OBJCOPY="${OBJCOPY:-riscv64-linux-gnu-objcopy}"
 
-for tool in "${AS}" "${AR}" "${RANLIB}" "${OBJCOPY}" ; do
-    command -v "${tool}" >/dev/null 2>&1 || fail "${tool} not found (apt install binutils-riscv64-linux-gnu)"
+for tool in "${AS}" "${CC}" "${AR}" "${RANLIB}" "${OBJCOPY}" ; do
+    command -v "${tool}" >/dev/null 2>&1 || fail "${tool} not found (apt install binutils-riscv64-linux-gnu gcc-riscv64-linux-gnu)"
 done
 
 mkdir -p "${OUTPUT_DIR}" "${TMP_DIR}"
@@ -66,7 +69,10 @@ tar -xzOf "${SDK_TARBALL}" --wildcards '*/libzkevm.a' > "${OUTPUT_DIR}/libsp1.a"
 # the guest's main), so localizing it would turn a resolvable undefined symbol
 # into an unresolvable one. In a bflat guest that reference is satisfied by
 # libbootstrapper.o, or by --defsym=main=__managed__Main for the zerolib stdlib.
-LOCALIZE="_start exit _exit abort __assert_fail memcpy"
+#
+# zkvm_secp256k1_ecrecover is localized for a different reason: step 3 below
+# supplies the guest-facing definition.
+LOCALIZE="_start exit _exit abort __assert_fail memcpy zkvm_secp256k1_ecrecover"
 LOCALIZE_ARGS=""
 for sym in ${LOCALIZE} ; do
     LOCALIZE_ARGS="${LOCALIZE_ARGS} --localize-symbol=${sym}"
@@ -83,10 +89,18 @@ echo "Assembling sp1_syscalls.S..."
 # soft-float crt1.o. The SDK members are already 0x0.
 printf '\x00' | dd of="${OUTPUT_DIR}/sp1_syscalls.o" bs=1 seek=48 count=1 conv=notrunc status=none
 
-"${AR}" r "${OUTPUT_DIR}/libsp1.a" "${OUTPUT_DIR}/sp1_syscalls.o" || fail "ar failed"
+# --- 3. secp256k1 recovery ------------------------------------------------
+echo "Compiling secp256k1 ecrecover..."
+"${CC}" -march=rv64im -mabi=lp64 -mcmodel=medany -fno-pic -ffreestanding \
+    -fno-stack-protector -O2 -std=c11 -Wall -Wextra -Werror \
+    -c "${ROOT_DIR}/src/secp256k1/ecrecover.c" \
+    -o "${OUTPUT_DIR}/secp256k1_ecrecover.o" || fail "compilation failed"
+
+"${AR}" r "${OUTPUT_DIR}/libsp1.a" "${OUTPUT_DIR}/sp1_syscalls.o" \
+    "${OUTPUT_DIR}/secp256k1_ecrecover.o" || fail "ar failed"
 "${RANLIB}" "${OUTPUT_DIR}/libsp1.a" || fail "ranlib failed"
 
-# --- 3. Manifest -----------------------------------------------------------
+# --- 4. Manifest -----------------------------------------------------------
 cp "${ROOT_DIR}/bflat-manifest.json" "${OUTPUT_DIR}/libsp1.bflat.manifest"
 if command -v jq >/dev/null 2>&1 ; then
     jq --arg ref "${SP1_REF}" '. + {sp1_ref: $ref}' \
