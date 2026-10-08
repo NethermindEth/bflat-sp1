@@ -36,10 +36,18 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
-      - name: Install RISC-V binutils
+      - name: Install the RISC-V toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y binutils-riscv64-linux-gnu
+          sudo apt-get install -y binutils-riscv64-linux-gnu gcc-riscv64-linux-gnu
+
+      - name: Check the generated secp256k1 tables
+        run: python3 src/secp256k1/gen_tables.py --check
+
+      - name: Test secp256k1 recovery on the host
+        # Emulates the SP1 precompiles and hooks, failing on any use the real
+        # precompiles reject, and diffs the result against a Python reference.
+        run: python3 tests/secp256k1/test_ecrecover.py
 
       - name: Build static library
         run: ./build/build.sh
@@ -155,13 +163,26 @@ jobs:
           riscv64-linux-gnu-readelf -h guest | grep -E 'Class:|Machine:|Entry point'
           ls -la guest
 
-      - name: Upload the linked guest
+      - name: Build the secp256k1 recovery guest
+        # Unlike the guest above this one is run, so it is stripped: SP1
+        # refuses the alignment padding an unstripped image keeps in .text.
+        run: |
+          bflat-riscv64/src/bflat/bin/Debug/net10.0/bflat build \
+            bflat-sp1/tests/secp256k1/guest.cs \
+            --os linux --arch riscv64 --libc sp1 --stdlib dotnet \
+            --no-pie --no-pthread -Ot --no-stacktrace-data --ldflags=--strip-all \
+            --extlib "$PWD/bflat-sp1/output/libsp1.bflat.manifest" \
+            -o secp256k1-guest
+
+      - name: Upload the linked guests
         # Keeping the image makes an "N instructions the VM cannot decode"
         # report something you can go and disassemble, instead of a number.
         uses: actions/upload-artifact@v4
         with:
           name: integration-guest
-          path: guest
+          path: |
+            guest
+            secp256k1-guest
 
       - name: Check the linked image
         # SP1 transpiles every executable word up front and panics on one it
@@ -171,6 +192,28 @@ jobs:
         # keeps them out.
         run: |
           python3 bflat-sp1/tests/integration/check_image.py guest --sp1-segments --no-atomics
+
+  run-secp256k1-guest:
+    # The host test emulates SP1; this runs the recovery on SP1's own executor,
+    # against the same reference, adversarial vectors included.
+    name: Run secp256k1 recovery on SP1
+    needs: link-guest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Download the linked guests
+        uses: actions/download-artifact@v4
+        with:
+          name: integration-guest
+          path: guests
+
+      - name: Run the vectors
+        run: |
+          expected=$(python3 tests/secp256k1/test_ecrecover.py --sp1-vectors guests/vectors.bin)
+          docker run --rm --shm-size=8g -v "$PWD/guests:/n" nethermindeth/sp1-runner:${SP1_REF} \
+            /n/secp256k1-guest /n/vectors.bin "$expected"
 
   build-nupkg:
     name: Build NuGet package
