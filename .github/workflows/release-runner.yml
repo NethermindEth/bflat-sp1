@@ -25,7 +25,7 @@ on:
       sp1_ref:
         description: SP1 release to build the harness against (tag = image tag)
         type: string
-        default: v6.5.0
+        default: v6.6.0
       portable:
         description: >-
           Build the portable-executor variant (tag suffix -portable). Slower,

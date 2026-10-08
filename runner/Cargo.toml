@@ -11,7 +11,7 @@ version = "0.0.0"
 edition = "2021"
 
 [dependencies]
-sp1-sdk = { git = "https://github.com/succinctlabs/sp1", tag = "v6.5.0", features = ["blocking"] }
+sp1-sdk = { git = "https://github.com/succinctlabs/sp1", tag = "v6.6.0", features = ["blocking"] }
 
 [features]
 # SP1 picks its executor at BUILD time (crates/core/executor/src/build.rs): on

@@ -57,7 +57,7 @@ $ ./build/build.sh
 
 Needs `binutils-riscv64-linux-gnu`, `gcc-riscv64-linux-gnu` and `gh` (to fetch the SDK release; drop the
 tarball into `tmp/` by hand to build offline). `SP1_REF` selects the SP1
-release, default `v6.5.0`. Output lands in `output/`.
+release, default `v6.6.0`. Output lands in `output/`.
 
 ## Why some symbols are localized
 

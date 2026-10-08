@@ -31,7 +31,7 @@ TMP_DIR="${ROOT_DIR}/tmp"
 
 # Pin the SP1 release the SDK is taken from. The syscall ids in
 # src/sp1_syscalls are tied to the same revision.
-SP1_REF="${SP1_REF:-v6.5.0}"
+SP1_REF="${SP1_REF:-v6.6.0}"
 SP1_REPO="${SP1_REPO:-succinctlabs/sp1}"
 
 AS="${AS:-riscv64-linux-gnu-as}"

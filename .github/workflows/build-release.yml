@@ -26,7 +26,7 @@ on:
 
 env:
   # Also the default for push/PR runs, where inputs are empty.
-  SP1_REF: ${{ inputs.sp1_ref || 'v6.5.0' }}
+  SP1_REF: ${{ inputs.sp1_ref || 'v6.6.0' }}
 
 jobs:
   build-libsp1:
