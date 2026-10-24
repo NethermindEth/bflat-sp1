@@ -84,7 +84,7 @@ Rust emits one codegen unit per crate, so a single member of `libzkevm.a`
 defines the accelerators **and** `_start`, `exit`, `_exit`, `abort`,
 `__assert_fail` and `memcpy`. Pulling in `zkvm_keccak256` therefore drags SP1's
 entire entry/exit runtime along with it, colliding with the guest's own `_start`
-(`modules/zkvm_sp1/module.S`), with pal's wrapped `exit`/`abort` and with musl's
+(`platform/entry.S`), with pal's wrapped `exit`/`abort` and with musl's
 `memcpy`. The build makes those local, so `libzkevm`'s internal calls still bind
 to its own copies while the guest's versions stay the only globals.
 

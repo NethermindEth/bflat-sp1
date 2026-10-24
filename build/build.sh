@@ -16,7 +16,7 @@
 # single member of libzkevm.a defines the accelerators AND `_start`, `exit`,
 # `_exit`, `abort`, `__assert_fail` and `memcpy`. Pulling in `zkvm_keccak256`
 # therefore drags SP1's whole entry/exit runtime in with it, which collides with
-# the guest's own `_start` (modules/zkvm_sp1/module.S), with pal's wrapped
+# the guest's own `_start` (platform/entry.S), with pal's wrapped
 # exit/abort and with musl's memcpy. Making them local keeps libzkevm's internal
 # calls bound to its own copies while leaving the guest's versions the only
 # globals the link can see.
