@@ -75,7 +75,7 @@
       "ugc-zero",
       "nothread",
       "noos",
-      "zisk_subst"
+      "guest_subst"
     ],
     "flags": ["no-atomics", "noos", "no-console", "no-fpu"],
     "linker_script": "sp1.ld",
