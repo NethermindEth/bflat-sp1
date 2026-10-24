@@ -10,3 +10,6 @@ src/runtime/*.bflat.manifest
 artifacts/
 bin/
 obj/
+
+# Platform unit test builds (tests/platform/run.sh)
+tests/platform/out/

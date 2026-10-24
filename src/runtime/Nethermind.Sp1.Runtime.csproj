@@ -24,13 +24,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Update="runtimes/linux-riscv64/native/libsp1.a">
+    <!-- The static library, the bflat manifests and the platform files (entry
+         object, linker scripts). The manifests name the other files by bare
+         name, so all of them stay side by side. -->
+    <None Update="runtimes/linux-riscv64/native/*">
       <Pack>true</Pack>
       <PackagePath>%(RelativeDir)%(Filename)%(Extension)</PackagePath>
-    </None>
-    <None Update="libsp1.bflat.manifest">
-      <Pack>true</Pack>
-      <PackagePath>runtimes/linux-riscv64/native/%(Filename)%(Extension)</PackagePath>
     </None>
     <None Include="README.md" Pack="true" PackagePath="/" />
   </ItemGroup>

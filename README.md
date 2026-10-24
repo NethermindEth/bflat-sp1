@@ -24,6 +24,23 @@ guests built with `--libc sp1`, providing the native half of
    per SP1 syscall, for anything the standard does not cover or that managed
    code wants to reach directly.
 
+## Platform
+
+This package also defines the SP1 target for bflat: `--libc sp1` selects
+the platform that `platform/` describes, so bflat itself knows nothing about
+SP1. `platform/build.sh` builds it into `output/` (`sp1_entry.o`, `sp1.ld` and `sp1.bflat.manifest`):
+
+- `entry.S` is the guest's `_start` and the SP1 halt protocol, plus the 64-bit `memcpy`/`memmove`/`memset`, and `__wrap_main`, which returns the guest's exit code to SP1.
+- the linker script is the SP1 memory map;
+- the platform manifest gives the instruction set, the ABI, the RyuJIT
+  options, the defines and the post-link steps, and lists the bflat modules
+  that the guest needs (format: `docs/manifest.md` in bflat-riscv64).
+
+`--extlib` with a `.bflat.manifest` path reads every `*.bflat.manifest` in that
+directory, so the platform and the bindings come together. A guest that does
+not use the accelerators can be built with the platform files alone.
+`tests/platform/run.sh` runs the unit tests of the entry point under qemu-user.
+
 ## Usage
 
 ```console
@@ -37,7 +54,7 @@ statically.
 
 ## Packaging
 
-`src/runtime` packs the static library and its manifest into
+`src/runtime` packs the static library, the platform files and the manifests into
 `Nethermind.Sp1.Runtime`, which is what a guest consumes:
 
 ```console

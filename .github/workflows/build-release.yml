@@ -87,7 +87,32 @@ jobs:
           path: |
             output/libsp1.a
             output/libsp1.bflat.manifest
+            output/sp1_entry.o
+            output/sp1.ld
+            output/sp1.bflat.manifest
           if-no-files-found: error
+
+  platform-tests:
+    # platform/entry.S, the bflat entry point of the guest: _start for the
+    # SP1 entry (with and without the bindings library), and the
+    # 64-bit memcpy/memmove/memset, cross-compiled and run under
+    # qemu-user. The tests came here from bflat-riscv64 with the entry point.
+    name: Platform unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install the RISC-V toolchain and qemu-user
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-riscv64-linux-gnu qemu-user-static
+
+      - name: Build the platform files
+        run: platform/build.sh
+
+      - name: Run the unit tests
+        run: tests/platform/run.sh
 
   link-guest:
     # The surface check above proves the symbols exist. This proves they LINK:
@@ -145,8 +170,10 @@ jobs:
 
       - name: Build bflat and its native modules
         working-directory: bflat-riscv64
-        # The modules leg is what produces lib/modules/zkvm_sp1/{script.ld,
-        # module.o} - the memory map this test is here to link against.
+        # The modules leg produces the lib/modules that the SP1 platform
+        # requires. The platform itself - entry point and memory map - is in
+        # this repository's output/ (platform/build.sh), next to libsp1, and
+        # --extlib reads both manifests from there.
         run: |
           ./build.sh modules riscv64 perf 10
           ./build.sh bflat riscv64 perf 10
@@ -242,20 +269,21 @@ jobs:
       - name: Move artifacts into the package project
         run: |
           mkdir -p src/runtime/runtimes/linux-riscv64/native
-          mv libsp1.a src/runtime/runtimes/linux-riscv64/native/
-          mv libsp1.bflat.manifest src/runtime/
+          mv libsp1.a libsp1.bflat.manifest sp1_entry.o sp1.ld sp1.bflat.manifest \
+             src/runtime/runtimes/linux-riscv64/native/
 
-      - name: Inject sp1_ref and the package version into the manifest
+      - name: Inject sp1_ref and the package version into the manifests
         run: |
           PREFIX=$(grep -oP '(?<=<VersionPrefix>)[^<]+' src/runtime/Directory.Build.props | tr -d '[:space:]')
           SUFFIX=$(grep -oP '(?<=<VersionSuffix>)[^<]+' src/runtime/Directory.Build.props | tr -d '[:space:]')
           VERSION="$PREFIX${SUFFIX:+-$SUFFIX}"
 
-          MANIFEST=src/runtime/libsp1.bflat.manifest
-          jq --arg ref "$SP1_REF" --arg version "$VERSION" \
-            '.version = $version | .metadata.sp1_ref = $ref' \
-            "$MANIFEST" > "$MANIFEST.tmp"
-          mv "$MANIFEST.tmp" "$MANIFEST"
+          for MANIFEST in src/runtime/runtimes/linux-riscv64/native/*.bflat.manifest ; do
+            jq --arg ref "$SP1_REF" --arg version "$VERSION" \
+              '.version = $version | .metadata.sp1_ref = $ref' \
+              "$MANIFEST" > "$MANIFEST.tmp"
+            mv "$MANIFEST.tmp" "$MANIFEST"
+          done
 
       - name: Pack
         working-directory: src/runtime
@@ -324,6 +352,9 @@ jobs:
             nupkg/*.nupkg
             libsp1/libsp1.a
             libsp1/libsp1.bflat.manifest
+            libsp1/sp1_entry.o
+            libsp1/sp1.ld
+            libsp1/sp1.bflat.manifest
           body: |
             SP1 zkVM accelerators for bflat guests.
 

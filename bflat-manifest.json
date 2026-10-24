@@ -4,6 +4,12 @@
   "name": "libsp1",
   "version": "1.0.0",
   "description": "SP1 zkVM accelerators (libsp1) for bflat guests",
-  "when": {"arch": "riscv64", "os": "linux", "platform": "zkvm_sp1"},
-  "objects": ["libsp1.a"]
+  "when": {"platform": "sp1"},
+  "objects": [
+    {
+      "file": "libsp1.a",
+      "group": "pre-entry",
+      "note": "In front of the linker script, where bflat linked --extlib static libraries before schema 2."
+    }
+  ]
 }

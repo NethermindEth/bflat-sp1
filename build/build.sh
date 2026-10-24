@@ -111,6 +111,10 @@ if command -v jq >/dev/null 2>&1 ; then
         && mv "${OUTPUT_DIR}/libsp1.bflat.manifest.tmp" "${OUTPUT_DIR}/libsp1.bflat.manifest"
 fi
 
+# --- 5. Platform ---------------------------------------------------------
+# The entry point, the memory map and the platform manifest (platform/).
+AS="${AS}" "${ROOT_DIR}/platform/build.sh" "${OUTPUT_DIR}" || fail "platform build failed"
+
 echo "Build completed"
 echo "Output: ${OUTPUT_DIR}/libsp1.a"
 echo "        ${OUTPUT_DIR}/libsp1.bflat.manifest (sp1_ref: ${SP1_REF})"
