@@ -77,7 +77,7 @@
       "noos",
       "guest_subst"
     ],
-    "flags": ["no-atomics", "noos", "no-console", "no-fpu"],
+    "flags": ["no-atomics", "noos", "no-console"],
     "linker_script": "sp1.ld",
     "entry": "sp1_entry.o"
   }
