@@ -15,12 +15,13 @@
  */
 .option norelax
 
-/* Marker read (as a weak symbol reference) by pal/module.c and rhp/module.c
- * to pick SP1's syscall protocol - halt via t0 = HALT, console writes via
- * t0 = WRITE - out of the shared objects those modules are built as. The
- * value is never dereferenced, only tested against NULL. */
-.global __zkvm_target_sp1
-.set    __zkvm_target_sp1, 1
+/* SP1 syscalls (sp1/crates/zkvm/entrypoint/src/syscalls/mod.rs): the id goes
+ * in t0, the arguments in a0.. - NOT the Linux a7 convention. An id SP1 does
+ * not know is a hard ExecutionError, so nothing may leak a stray ecall. */
+.equ SP1_HALT,                   0x00
+.equ SP1_WRITE,                  0x02
+.equ SP1_COMMIT,                 0x10
+.equ SP1_COMMIT_DEFERRED_PROOFS, 0x1A
 
 .section .rodata
     .balign 8
@@ -39,6 +40,14 @@ argv_vec:
     .balign 8
 sp1_start_ptr:
     .dword __start
+
+/* SP1's own halt, from libzkevm (the zkEVM SDK repackaged as the bindings
+ * library). Weak for the same reason as __start, and taken through .data for
+ * the same reason. */
+.weak zkvm_halt
+    .balign 8
+sp1_halt_ptr:
+    .dword zkvm_halt
 
 /* Nethermind's KeccakHash reaches the permutation through
  * Accelerators.KeccakF, whose binding is named for ziskos: syscall_keccak_f.
@@ -60,6 +69,87 @@ syscall_keccak_f:
     tail    zkvm_keccak_permute
     .cfi_endproc
     .size   syscall_keccak_f, .-syscall_keccak_f
+
+/* ------------------------------------------------------------------------
+ * The platform interface of bflat's modules (docs/manifest.md in
+ * bflat-riscv64, "Platform interface"). bflat's pal calls these; it holds no
+ * code for any one zkVM. SP1 defines no zkvm_platform_syscall: it has no
+ * Linux syscalls, so pal's syscall fails instead.
+ * ------------------------------------------------------------------------ */
+
+/* SHA-256 of the empty byte string, as the eight little-endian u32 words
+ * SP1's syscall_halt commits before halting. SP1 hashes everything the guest
+ * writes to FD_PUBLIC_VALUES and commits the digest; without the bindings
+ * library nothing can write that descriptor (write_output lives in libzkevm;
+ * console output goes to fd 1), so the stream is empty and its digest is
+ * constant. Any future code path that writes public values without libzkevm
+ * would invalidate it: the proof would carry a digest that does not match its
+ * public values. Execution is unaffected either way; only proving is. */
+.section .rodata.sp1_empty_pv_digest,"a",@progbits
+    .balign 4
+sp1_empty_pv_digest:
+    .word 0x42c4b0e3, 0x141cfc98, 0xc8f4fb9a, 0x24b96f99
+    .word 0xe441ae27, 0x4c939b64, 0x1b9995a4, 0x55b85278
+
+/* zkvm_platform_exit(long code): SP1 halts on its HALT syscall, and expects
+ * the public-values and deferred-proof digests committed first. That commit
+ * has to hash whatever the guest wrote to FD_PUBLIC_VALUES, so it belongs to
+ * whoever owns write_output - libzkevm - and this hands over to its zkvm_halt
+ * when it is linked. The open-coded sequence is the fallback for a guest
+ * built without the bindings library: the digest of the empty stream, eight
+ * zero words of deferred proofs (this guest verifies none, but SP1's own
+ * entrypoint commits the eight words unconditionally), then HALT with the
+ * low byte of the code. It never returns, so it keeps its state in s1-s3. */
+.section .text.zkvm_platform_exit,"ax",@progbits
+.global zkvm_platform_exit
+.type   zkvm_platform_exit, @function
+zkvm_platform_exit:
+    .cfi_startproc
+    andi    s1, a0, 0xff     # the exit code SP1 takes: one byte
+    la      t1, sp1_halt_ptr
+    ld      t1, 0(t1)
+    beqz    t1, 1f
+    mv      a0, s1
+    jalr    t1               # zkvm_halt(code): commits and halts
+1:  la      s2, sp1_empty_pv_digest
+    li      s3, 0
+2:  li      t0, SP1_COMMIT
+    mv      a0, s3           # word index
+    lwu     a1, 0(s2)        # word value
+    ecall
+    addi    s2, s2, 4
+    addi    s3, s3, 1
+    li      t1, 8
+    blt     s3, t1, 2b
+    li      s3, 0
+3:  li      t0, SP1_COMMIT_DEFERRED_PROOFS
+    mv      a0, s3
+    li      a1, 0
+    ecall
+    addi    s3, s3, 1
+    li      t1, 8
+    blt     s3, t1, 3b
+    li      t0, SP1_HALT
+    mv      a0, s1
+    ecall
+4:  j       4b               # HALT ends the program; loop is just in case
+    .cfi_endproc
+    .size   zkvm_platform_exit, .-zkvm_platform_exit
+
+/* zkvm_platform_write(int fd, const char *buf, int len): the WRITE syscall,
+ * which prints descriptors 1 and 2 on the host and warns about any other
+ * (sp1/crates/core/executor/src/minimal/write.rs), so the descriptor is
+ * passed straight through. pal calls it only with len > 0. */
+.section .text.zkvm_platform_write,"ax",@progbits
+.global zkvm_platform_write
+.type   zkvm_platform_write, @function
+zkvm_platform_write:
+    .cfi_startproc
+    li      t0, SP1_WRITE    # a0 = fd, a1 = buf, a2 = len
+    ecall
+    ret
+    .cfi_endproc
+    .size   zkvm_platform_write, .-zkvm_platform_write
 
 .section .text.init
 .global _start
@@ -85,8 +175,9 @@ _start:
      * and has no __start at all - the sample guests in CI are exactly that.
      * There is nothing to initialise in that case (the Rust allocator and the
      * public-values stream both live in the bindings), so the fallback enters
-     * the .NET start-up directly and lets pal's zkvm_raw_exit issue the
-     * open-coded commit-and-halt sequence it keeps for this case.
+     * the .NET start-up directly, and its exit reaches zkvm_platform_exit
+     * above, which keeps the open-coded commit-and-halt sequence for this
+     * case.
      *
      * The address is taken through a word in .data rather than `la`: a
      * PC-relative reference to an undefined weak symbol resolves to absolute
@@ -102,7 +193,7 @@ _start:
     ecall
 1:  j       1b               # loop forever
 2:  /* No bindings library: uBootstrap_main is reached the way OpenVM reaches
-     * it, and termination goes through pal. */
+     * it, and termination goes through pal into zkvm_platform_exit. */
     li      a0, 1            # argc = 1
     la      a1, argv_vec     # argv = &argv_vec[0]
     call    noos_start_main

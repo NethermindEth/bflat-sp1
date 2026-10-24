@@ -31,6 +31,8 @@ the platform that `platform/` describes, so bflat itself knows nothing about
 SP1. `platform/build.sh` builds it into `output/` (`sp1_entry.o`, `sp1.ld` and `sp1.bflat.manifest`):
 
 - `entry.S` is the guest's `_start` and the SP1 halt protocol, plus the 64-bit `memcpy`/`memmove`/`memset`, and `__wrap_main`, which returns the guest's exit code to SP1.
+- `entry.S` also implements the platform interface that bflat's modules call
+  (bflat itself has no code for any one zkVM): `zkvm_platform_exit` (`zkvm_halt` of libzkevm, or the commits and `HALT` without it) and `zkvm_platform_write` (the `WRITE` syscall).
 - the linker script is the SP1 memory map;
 - the platform manifest gives the instruction set, the ABI, the RyuJIT
   options, the defines and the post-link steps, and lists the bflat modules

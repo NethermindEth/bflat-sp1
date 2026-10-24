@@ -211,11 +211,32 @@ void zkvm_keccakf(void *state) /* openvm */
 extern void syscall_keccak_f(void *state);
 extern int __wrap_main(void);
 
+/* The platform interface (the functions bflat's pal calls). */
+extern void zkvm_platform_exit(long code);
+
+#ifndef ZKVM_ENTRY_SP1_NOBIND
+/* libzkevm's zkvm_halt, which owns the commit-and-halt sequence when the
+ * bindings library is linked: the child exits with the code it is handed.
+ * Without the bindings library (the nobind build) zkvm_platform_exit issues
+ * SP1's own syscalls, which qemu-user cannot run. */
+void zkvm_halt(unsigned char exit_code)
+{
+    _exit(exit_code);
+}
+#endif
+
 int main(void)
 {
     /* One shot: _start clobbers sp/gp and never returns, so it only runs
      * in the child. Any verdict other than OK surfaces as its own code. */
     EXPECT_EXIT(OK, zkvm_module_start());
+
+#ifndef ZKVM_ENTRY_SP1_NOBIND
+    /* zkvm_platform_exit hands over to zkvm_halt, with the one byte of exit
+     * code that SP1 takes. */
+    EXPECT_EXIT(42, zkvm_platform_exit(42));
+    EXPECT_EXIT(0x2a, zkvm_platform_exit(0x12a));
+#endif
 
     /* main() as SP1's __start calls it: no arguments, and the guest's
      * exit code comes back through the return value. */
