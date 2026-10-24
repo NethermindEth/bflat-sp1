@@ -68,6 +68,16 @@ $ bflat build app.cs --os linux --arch riscv64 --libc sp1 \
 symbol surface, packs the nupkg on every push, and publishes to NuGet plus cuts
 a GitHub release when run manually with `publish` set to Staging or Production.
 
+## Signature
+
+The release job signs the `.nupkg` before it publishes it
+(`scripts/sign_package.py`, with the GitHub Actions secret
+`BFLAT_SIGNING_KEY`). bflat refuses a package with a bad signature, and an
+unsigned package unless `--allow-unsigned` is given. A local
+`.bflat.manifest` is not checked. See `docs/signing.md` in bflat-riscv64.
+`scripts/sign_package.py` is a copy of the script in bflat-riscv64; keep it
+the same.
+
 ## Building locally
 
 ```console

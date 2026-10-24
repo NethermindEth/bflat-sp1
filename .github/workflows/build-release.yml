@@ -289,6 +289,22 @@ jobs:
         working-directory: src/runtime
         run: dotnet pack Nethermind.Sp1.Runtime.csproj -c release
 
+      # The signature that bflat checks (docs/signing.md in bflat-riscv64),
+      # before the push and the GitHub release. A package that is published
+      # must be signed: the script stops if the key is not set. A build that
+      # publishes nothing (a PR, or publish: No) may be unsigned.
+      - name: Sign
+        working-directory: src/runtime
+        env:
+          BFLAT_SIGNING_KEY: ${{ secrets.BFLAT_SIGNING_KEY }}
+          PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish != 'No' }}
+        run: |
+          if [ -z "$BFLAT_SIGNING_KEY" ] && [ "$PUBLISH" != "true" ]; then
+            echo "::notice::BFLAT_SIGNING_KEY is not set: the package is not signed, and it is not published"
+            exit 0
+          fi
+          python3 ../../scripts/sign_package.py nupkg ./artifacts/package/release/*.nupkg
+
       - name: Get package version
         id: pkg
         working-directory: src/runtime
