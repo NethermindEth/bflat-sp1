@@ -106,7 +106,7 @@ echo "Compiling secp256k1 ecrecover..."
 # --- 4. Manifest -----------------------------------------------------------
 cp "${ROOT_DIR}/bflat-manifest.json" "${OUTPUT_DIR}/libsp1.bflat.manifest"
 if command -v jq >/dev/null 2>&1 ; then
-    jq --arg ref "${SP1_REF}" '. + {sp1_ref: $ref}' \
+    jq --arg ref "${SP1_REF}" '.metadata.sp1_ref = $ref' \
         "${OUTPUT_DIR}/libsp1.bflat.manifest" > "${OUTPUT_DIR}/libsp1.bflat.manifest.tmp" \
         && mv "${OUTPUT_DIR}/libsp1.bflat.manifest.tmp" "${OUTPUT_DIR}/libsp1.bflat.manifest"
 fi

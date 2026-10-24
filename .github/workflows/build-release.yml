@@ -145,8 +145,8 @@ jobs:
 
       - name: Build bflat and its native modules
         working-directory: bflat-riscv64
-        # The modules leg is what produces lib/linux/riscv64/sp1/{script.ld,
-        # entrypoint.o} - the memory map this test is here to link against.
+        # The modules leg is what produces lib/modules/zkvm_sp1/{script.ld,
+        # module.o} - the memory map this test is here to link against.
         run: |
           ./build.sh modules riscv64 perf 10
           ./build.sh bflat riscv64 perf 10
@@ -245,7 +245,7 @@ jobs:
           mv libsp1.a src/runtime/runtimes/linux-riscv64/native/
           mv libsp1.bflat.manifest src/runtime/
 
-      - name: Inject sp1_ref and package_version into the manifest
+      - name: Inject sp1_ref and the package version into the manifest
         run: |
           PREFIX=$(grep -oP '(?<=<VersionPrefix>)[^<]+' src/runtime/Directory.Build.props | tr -d '[:space:]')
           SUFFIX=$(grep -oP '(?<=<VersionSuffix>)[^<]+' src/runtime/Directory.Build.props | tr -d '[:space:]')
@@ -253,7 +253,7 @@ jobs:
 
           MANIFEST=src/runtime/libsp1.bflat.manifest
           jq --arg ref "$SP1_REF" --arg version "$VERSION" \
-            '. + {sp1_ref: $ref, package_version: $version}' \
+            '.version = $version | .metadata.sp1_ref = $ref' \
             "$MANIFEST" > "$MANIFEST.tmp"
           mv "$MANIFEST.tmp" "$MANIFEST"
 
