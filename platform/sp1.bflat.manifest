@@ -27,6 +27,22 @@
     "isa": {"disable": ["c", "a", "f", "d", "zba", "zbb", "zbs", "zicond"]},
     "options": [
       {
+        "value": "JitObjectStackAllocation=1",
+        "when": {"optimize": true},
+        "note": "Stack-allocate the objects that do not escape. bflat set this and the three options below for every optimized build until they moved to the platforms."
+      },
+      {
+        "value": "JitObjectStackAllocationSize=2000",
+        "when": {"optimize": true},
+        "note": "The largest stack-allocated object: 0x2000 = 8192 bytes (default 0x210 = 528). The runtime patch 25_stackalloc_aggressive_riscv64 lifts the in-loop heap restriction."
+      },
+      {
+        "value": "JitExtDefaultPolicyMaxIL=200",
+        "when": {"optimize": true},
+        "note": "Inlining caps, raised moderately: inlinees up to 0x200 = 512 bytes of IL (default 0x80) and 0x10 = 16 basic blocks (default 7). The policy still weighs code growth; JitAggressiveInlining makes the image much larger."
+      },
+      {"value": "JitExtDefaultPolicyMaxBB=10", "when": {"optimize": true}},
+      {
         "value": "RiscV64ElideLeafRaSave=1",
         "when": {"optimize": true},
         "note": "Elide the RA spill/reload and frame in leaf methods (dotnet-riscv patches 23 and 31). Sound only on a single-threaded deterministic guest with no GC thread suspension and no return-address hijacking."
