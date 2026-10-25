@@ -70,9 +70,13 @@ a GitHub release when run manually with `publish` set to Staging or Production.
 
 ## Signature
 
-The release job signs the `.nupkg` before it publishes it
-(`scripts/sign_package.py`, with the GitHub Actions secret
-`BFLAT_SIGNING_KEY`). bflat refuses a package with a bad signature, and an
+The release workflow signs the `.nupkg` before it publishes it. The build
+job lists the package entries (`scripts/sign_package.py list-nupkg`). The
+sign job, the reusable workflow `sign.yml` of bflat-riscv64, signs the lists
+with the GitHub Actions secret `BFLAT_SIGNING_KEY`; it is the only job that
+has the key, and it runs no build. The publish job adds the signatures
+(`scripts/sign_package.py embed`) and checks them with the variable
+`BFLAT_SIGNING_PUBLIC_KEY`. bflat refuses a package with a bad signature, and an
 unsigned package unless `--allow-unsigned` is given. A local
 `.bflat.manifest` is not checked. See `docs/signing.md` in bflat-riscv64.
 `scripts/sign_package.py` is a copy of the script in bflat-riscv64; keep it

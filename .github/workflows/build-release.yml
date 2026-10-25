@@ -248,10 +248,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
-    env:
-      NUGET_URL: ${{ inputs.publish == 'Staging' && 'https://int.nugettest.org' || 'https://www.nuget.org' }}
-      NUGET_SOURCE: ${{ inputs.publish == 'Staging' && 'https://apiint.nugettest.org' || 'https://api.nuget.org' }}/v3/index.json
     outputs:
       version: ${{ steps.pkg.outputs.version }}
     steps:
@@ -289,21 +285,12 @@ jobs:
         working-directory: src/runtime
         run: dotnet pack Nethermind.Sp1.Runtime.csproj -c release
 
-      # The signature that bflat checks (docs/signing.md in bflat-riscv64),
-      # before the push and the GitHub release. A package that is published
-      # must be signed: the script stops if the key is not set. A build that
-      # publishes nothing (a PR, or publish: No) may be unsigned.
-      - name: Sign
+      # The lists of the package entries, for the sign job (docs/signing.md
+      # in bflat-riscv64). This job has no key: the sign job signs the lists,
+      # and the publish job adds the signatures to the package.
+      - name: List the package entries
         working-directory: src/runtime
-        env:
-          BFLAT_SIGNING_KEY: ${{ secrets.BFLAT_SIGNING_KEY }}
-          PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish != 'No' }}
-        run: |
-          if [ -z "$BFLAT_SIGNING_KEY" ] && [ "$PUBLISH" != "true" ]; then
-            echo "::notice::BFLAT_SIGNING_KEY is not set: the package is not signed, and it is not published"
-            exit 0
-          fi
-          python3 ../../scripts/sign_package.py nupkg ./artifacts/package/release/*.nupkg
+        run: python3 ../../scripts/sign_package.py list-nupkg ../../signature ./artifacts/package/release/*.nupkg
 
       - name: Get package version
         id: pkg
@@ -313,8 +300,70 @@ jobs:
           VERSION=$(basename "$PKG" .nupkg | sed 's/^Nethermind\.Sp1\.Runtime\.//')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
+      - name: Upload nupkg artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: nupkg-unsigned
+          path: src/runtime/artifacts/package/release/*.nupkg
+          if-no-files-found: error
+
+      - name: Upload the lists
+        uses: actions/upload-artifact@v7
+        with:
+          name: bflat-signature-lists
+          path: signature/*.sha256
+          if-no-files-found: error
+
+  # The private key is only in the sign job, which runs no build
+  # (docs/signing.md in bflat-riscv64).
+  sign:
+    name: Sign the package
+    if: github.event_name == 'workflow_dispatch' && inputs.publish != 'No'
+    needs: build-nupkg
+    uses: NethermindEth/bflat-riscv64/.github/workflows/sign.yml@master
+    with:
+      lists: bflat-signature-lists
+    secrets:
+      BFLAT_SIGNING_KEY: ${{ secrets.BFLAT_SIGNING_KEY }}
+
+  publish-nupkg:
+    name: Publish NuGet package
+    if: github.event_name == 'workflow_dispatch' && inputs.publish != 'No'
+    needs: sign
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      NUGET_URL: ${{ inputs.publish == 'Staging' && 'https://int.nugettest.org' || 'https://www.nuget.org' }}
+      NUGET_SOURCE: ${{ inputs.publish == 'Staging' && 'https://apiint.nugettest.org' || 'https://api.nuget.org' }}/v3/index.json
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+
+      - name: Download nupkg artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: nupkg-unsigned
+          path: nupkg
+
+      - name: Download the signatures
+        uses: actions/download-artifact@v8
+        with:
+          name: bflat-signatures
+          path: signature
+
+      # Each package must agree with the list that was signed, and the
+      # signature must be valid for the public key, before the push.
+      - name: Add the signatures
+        env:
+          BFLAT_SIGNING_PUBLIC_KEY: ${{ vars.BFLAT_SIGNING_PUBLIC_KEY }}
+        run: python3 scripts/sign_package.py embed signature nupkg/*.nupkg
+
       - name: NuGet login
-        if: github.event_name == 'workflow_dispatch' && inputs.publish != 'No'
         uses: nuget/login@v1
         id: login
         with:
@@ -323,10 +372,8 @@ jobs:
           token-service-url: ${{ env.NUGET_URL }}/api/v2/token
 
       - name: Publish NuGet package
-        if: github.event_name == 'workflow_dispatch' && inputs.publish != 'No'
-        working-directory: src/runtime
         run: |
-          dotnet nuget push ./artifacts/package/release/*.nupkg \
+          dotnet nuget push nupkg/*.nupkg \
             -k "${{ steps.login.outputs.NUGET_API_KEY }}" -s ${{ env.NUGET_SOURCE }} \
             --skip-duplicate
 
@@ -334,13 +381,13 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: nupkg
-          path: src/runtime/artifacts/package/release/*.nupkg
+          path: nupkg/*.nupkg
           if-no-files-found: error
 
   publish-nupkg-github:
     name: Publish to GitHub
     if: github.event_name == 'workflow_dispatch' && inputs.publish != 'No'
-    needs: build-nupkg
+    needs: [build-nupkg, publish-nupkg]
     runs-on: ubuntu-latest
     permissions:
       contents: write
