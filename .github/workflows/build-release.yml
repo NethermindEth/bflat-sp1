@@ -285,6 +285,20 @@ jobs:
           echo "Detected version $version"
           echo "version=$version" >> $GITHUB_OUTPUT
 
+      # A run that is run again keeps its run number, and with it the
+      # version. Its publish jobs would replace the files of the release
+      # that has the version already. Start a new run instead.
+      - name: Check that the release does not exist
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != 'No'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1 ; then
+            echo "::error::the release v$VERSION exists already: start a new run"
+            exit 1
+          fi
+
       - name: Inject sp1_ref and the package version into the manifests
         run: |
           VERSION="${{ steps.version.outputs.version }}"
@@ -383,8 +397,7 @@ jobs:
       - name: Publish NuGet package
         run: |
           dotnet nuget push nupkg/*.nupkg \
-            -k "${{ steps.login.outputs.NUGET_API_KEY }}" -s ${{ env.NUGET_SOURCE }} \
-            --skip-duplicate
+            -k "${{ steps.login.outputs.NUGET_API_KEY }}" -s ${{ env.NUGET_SOURCE }}
 
       - name: Upload nupkg artifact
         uses: actions/upload-artifact@v7
