@@ -9,7 +9,7 @@ on:
     inputs:
       bflat_ref:
         description: bflat-riscv64 ref to build the linker against
-        default: master
+        default: refactor/prep
         type: string
       publish:
         description: Publish to NuGet
@@ -132,6 +132,12 @@ jobs:
       # 26.04 ships 78 with no compatible soname. bflat-riscv64's own CI does
       # not hit this because it runs bflat from its packaged Docker image.
       image: ubuntu:24.04
+    env:
+      # The SDK of the CI of bflat-riscv64; bflat builds for .NET 11 only.
+      SDK_VERSION: 11.0.100-preview.6.26359.118
+      # bflat checks the signatures of the releases it downloads (the
+      # dotnet-riscv runtime and uGC) with this key.
+      BFLAT_SIGNING_PUBLIC_KEY: ${{ vars.BFLAT_SIGNING_PUBLIC_KEY }}
     steps:
       - name: Install the toolchain
         run: |
@@ -148,7 +154,7 @@ jobs:
         run: |
           wget -q https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh
           chmod +x dotnet-install.sh
-          ./dotnet-install.sh --channel 10.0 --install-dir /usr/share/dotnet
+          ./dotnet-install.sh --version "$SDK_VERSION" --install-dir /usr/share/dotnet
           ln -sf /usr/share/dotnet/dotnet /usr/bin/dotnet
           echo "DOTNET_ROOT=/usr/share/dotnet" >> $GITHUB_ENV
           echo "/usr/share/dotnet" >> $GITHUB_PATH
@@ -162,7 +168,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: NethermindEth/bflat-riscv64
-          ref: ${{ inputs.bflat_ref || 'feature/new_zkvms' }}
+          ref: ${{ inputs.bflat_ref || 'refactor/prep' }}
           path: bflat-riscv64
 
       - name: Download the libsp1 artifact
@@ -178,13 +184,13 @@ jobs:
         # this repository's output/ (platform/build.sh), next to libsp1, and
         # --extlib reads both manifests from there.
         run: |
-          ./build.sh modules riscv64 perf 10
-          ./build.sh bflat riscv64 perf 10
+          ./build.sh modules riscv64
+          ./build.sh bflat riscv64
 
       - name: Link the guest against libsp1
         run: |
           set -e
-          bflat-riscv64/src/bflat/bin/Debug/net10.0/bflat build \
+          bflat-riscv64/src/bflat/bin/Debug/net11.0/bflat build \
             bflat-sp1/tests/integration/guest.cs \
             --os linux --arch riscv64 --libc sp1 --stdlib dotnet \
             --no-pie --no-pthread -Ot \
@@ -197,7 +203,7 @@ jobs:
         # Unlike the guest above this one is run, so it is stripped: SP1
         # refuses the alignment padding an unstripped image keeps in .text.
         run: |
-          bflat-riscv64/src/bflat/bin/Debug/net10.0/bflat build \
+          bflat-riscv64/src/bflat/bin/Debug/net11.0/bflat build \
             bflat-sp1/tests/secp256k1/guest.cs \
             --os linux --arch riscv64 --libc sp1 --stdlib dotnet \
             --no-pie --no-pthread -Ot --no-stacktrace-data --ldflags=--strip-all \
