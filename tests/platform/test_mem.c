@@ -33,8 +33,6 @@ extern void *__wrap_memset(void *dst, int c, size_t n);
  * none of them runs here. */
 void noos_start_main(int argc, char *argv[]) { (void)argc; (void)argv; _exit(99); }
 int noos_main(int argc, char *argv[]) { (void)argc; (void)argv; _exit(99); }
-void zkvm_keccak_permute(void *state) { (void)state; _exit(99); }
-void zkvm_keccakf(void *state) { (void)state; _exit(99); }
 uint8_t zkvm_test_stack[16] __attribute__((aligned(16)));
 uint8_t zkvm_test_gp[16] __attribute__((aligned(16)));
 

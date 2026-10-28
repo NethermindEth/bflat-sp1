@@ -192,23 +192,6 @@ int noos_main(int argc, char *argv[])
     return NOOS_MAIN_RESULT;
 }
 
-/* The keccak permutation the managed side reaches through the ziskos name
- * syscall_keccak_f; each entry module tail-calls its target's spelling.
- * Both names are defined unconditionally - only the one the module under
- * test references is linked in. */
-static void *keccak_state;
-
-void zkvm_keccak_permute(void *state) /* sp1 */
-{
-    keccak_state = state;
-}
-
-void zkvm_keccakf(void *state) /* openvm */
-{
-    keccak_state = state;
-}
-
-extern void syscall_keccak_f(void *state);
 extern int __wrap_main(void);
 
 /* The platform interface (the functions bflat's pal calls). */
@@ -242,16 +225,6 @@ int main(void)
      * exit code comes back through the return value. */
     CHECK(__wrap_main() == NOOS_MAIN_RESULT);
     CHECK(noos_main_verdict == OK);
-
-    /* syscall_keccak_f is a tail call: the state pointer must arrive
-     * untouched at the target's own name. */
-    {
-        uint64_t state[25] = {0};
-
-        keccak_state = NULL;
-        syscall_keccak_f(state);
-        CHECK(keccak_state == (void *)state);
-    }
 
     TEST_MAIN_END(ZKVM_MODULE_NAME);
 }

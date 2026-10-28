@@ -74,6 +74,18 @@
 
 /* ---- Hashes ------------------------------------------------------------ */
 SP1_SYSCALL_1     zkvm_keccak_permute,          0x00010109  /* [u64; 25]      */
+
+/* Nethermind's KeccakHash reaches the permutation through
+ * Accelerators.KeccakF, whose binding is named for ziskos: syscall_keccak_f.
+ * The eth-act standard covers zkvm_keccak256 and defines no permutation, so
+ * each zkVM spells it its own way. The ABI is the same - a0 points at the 25
+ * u64 state words - so the binding's name labels the shim above: a tail call
+ * to it would add two instructions to every permutation, one for each 136
+ * bytes a guest hashes. */
+    .global syscall_keccak_f
+    .type syscall_keccak_f, @function
+    .set syscall_keccak_f, zkvm_keccak_permute
+    .size syscall_keccak_f, .-zkvm_keccak_permute
 SP1_SYSCALL_1     zkvm_sha256_extend,           0x00300105  /* [u32; 64]      */
 SP1_SYSCALL_N     zkvm_sha256_compress,         0x00010106  /* w, state       */
 SP1_SYSCALL_1     zkvm_poseidon2,               0x00000133  /* in/out         */

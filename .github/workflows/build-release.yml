@@ -76,6 +76,13 @@ jobs:
           if [ -n "$leaked" ] ; then
             echo "LEAKED AS GLOBAL: $leaked"; missing=$((missing + 1))
           fi
+          # The binding's name for the keccak permutation labels SP1's shim
+          # itself (src/sp1_syscalls/sp1_syscalls.S), not a call to it.
+          keccak=$($NM --defined-only output/libsp1.a 2>/dev/null \
+                   | awk '$2 == "T" && ($3 == "zkvm_keccak_permute" || $3 == "syscall_keccak_f") {print $1}')
+          if [ "$(echo "$keccak" | wc -l)" != 2 ] || [ "$(echo "$keccak" | sort -u | wc -l)" != 1 ] ; then
+            echo "syscall_keccak_f IS NOT zkvm_keccak_permute: $keccak"; missing=$((missing + 1))
+          fi
           [ "$missing" = "0" ] || { echo "accelerator surface check failed"; exit 1; }
           echo "accelerator surface OK"
 
