@@ -233,9 +233,9 @@ __wrap_main:
  * and a guest's copies mostly come from an unaligned source (data decoded out
  * of the input). This aligns the destination, then moves 64-bit words,
  * merging a misaligned source from the aligned words that hold it. SP1
- * rejects misaligned loads and stores, so every access is either a byte or an
- * aligned doubleword; reading a whole aligned word that holds a needed byte
- * never reaches past the source's last word.
+ * rejects misaligned loads and stores, so every access is a byte or a
+ * naturally aligned half, word or doubleword; reading a whole aligned word
+ * that holds a needed byte never reaches past the source's last word.
  *
  * Weak so a guest that still links its own __wrap_memcpy keeps it rather than
  * failing the link on a duplicate definition. */
@@ -305,7 +305,7 @@ __wrap_memcpy:
     addi    a2, a2, -32
 .Lwords:
     li      t1, 8
-    bltu    a2, t1, .Lbytes
+    bltu    a2, t1, .Lword_tail
 .Lword:
     ld      t2, 0(a1)
     sd      t2, 0(t6)
@@ -313,7 +313,10 @@ __wrap_memcpy:
     addi    t6, t6, 8
     addi    a2, a2, -8
     bgeu    a2, t1, .Lword
-    j       .Lbytes
+.Lword_tail:
+    beqz    a2, .Ldone
+    ld      t2, 0(a1)
+    j       .Ltail
 
     /* t0 = src & 7. Each destination word is the high bytes of one aligned
      * source word and the low bytes of the next: t3 and t4 are the two
@@ -399,11 +402,37 @@ __wrap_memcpy:
     sll     a5, t5, t4
     or      a4, a4, a5
     sd      a4, 0(t6)
+    mv      t2, t5
     addi    a3, a3, 8
     addi    t6, t6, 8
     addi    a2, a2, -8
 .Lmerge_done:
-    add     a1, a3, t0
+    beqz    a2, .Ldone
+    srl     t2, t2, t3
+    add     t1, t0, a2
+    li      t5, 8
+    bleu    t1, t5, .Ltail
+    ld      t5, 8(a3)
+    sll     t5, t5, t4
+    or      t2, t2, t5
+
+    /* The destination is word-aligned and the last 1-7 bytes are the low
+     * bytes of t2, so they go out as at most a word, a half and a byte. */
+.Ltail:
+    andi    t1, a2, 4
+    beqz    t1, 1f
+    sw      t2, 0(t6)
+    srli    t2, t2, 32
+    addi    t6, t6, 4
+1:  andi    t1, a2, 2
+    beqz    t1, 2f
+    sh      t2, 0(t6)
+    srli    t2, t2, 16
+    addi    t6, t6, 2
+2:  andi    t1, a2, 1
+    beqz    t1, .Ldone
+    sb      t2, 0(t6)
+    ret
 
 .Lbytes:
     beqz    a2, .Ldone
