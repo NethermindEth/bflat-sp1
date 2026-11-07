@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-FileCopyrightText: 2026 Demerzel Solutions Limited
 # SPDX-License-Identifier: MIT
-"""Generates secp256k1_tables.h, the fixed-base tables ecrecover.c multiplies G with.
+"""Generates secp256k1_tables.h, the fixed-base tables ecrecover.c multiplies G with, each also negated.
 
     gen_tables.py            rewrite the header next to this script
     gen_tables.py --check    fail if the checked-in header differs from a fresh one
@@ -54,6 +54,7 @@ def emit(name, comment, points):
 def render():
     g = odd_multiples(G)
     lambda_g = [(BETA * x % P, y) for x, y in g]
+    negate = lambda table: [(x, P - y) for x, y in table]
     return "\n".join([
         "/* SPDX-FileCopyrightText: 2026 Demerzel Solutions Limited",
         " * SPDX-License-Identifier: MIT",
@@ -68,6 +69,10 @@ def render():
         emit("SECP256K1_G_TABLE", "(2i + 1) * G", g),
         "",
         emit("SECP256K1_LAMBDA_G_TABLE", "(2i + 1) * lambda * G = (beta * x, y) of the entry above", lambda_g),
+        "",
+        emit("SECP256K1_NEG_G_TABLE", "-(2i + 1) * G", negate(g)),
+        "",
+        emit("SECP256K1_NEG_LAMBDA_G_TABLE", "-(2i + 1) * lambda * G", negate(lambda_g)),
         "",
         "#endif",
         "",

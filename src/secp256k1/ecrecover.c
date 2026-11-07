@@ -326,50 +326,57 @@ static int bit_length(const uint64_t a[4])
 
 /* Writes the width-w NAF of s into digits[4 * i] for i < len: odd digits in
  * (-2^(w-1), 2^(w-1)), at least w - 1 zeros between two of them. len must
- * exceed the bit length of s for the last carry to land inside it. */
+ * exceed the bit length of s for the last carry to land inside it.
+ *
+ * The bits from the current position on are kept in a register, loaded again
+ * from s only when fewer than w are left in it. A digit can take all w bits
+ * even near len: the bits of s past its bit length are zero. */
 static void wnaf(int8_t *digits, const uint64_t s[5], int w, int len)
 {
-    int bit = 0;
-    uint32_t carry = 0;
-    while (bit < len)
+    const uint64_t mask = (1u << w) - 1;
+    /* Addresses as integers: the last step can go past the end of digits. */
+    uintptr_t out = (uintptr_t)digits;
+    const uintptr_t end = out + 4 * (uintptr_t)len;
+    uintptr_t reload = out + 4 * (uintptr_t)(64 - w);
+    uint64_t carry = 0;
+    uint64_t window = s[0];
+    while (out < end)
     {
-        if (((s[bit >> 6] >> (bit & 63)) & 1) == carry)
+        if (out > reload)
         {
-            bit++;
+            uintptr_t at = out;
+            /* Keeps the address work below out of the common path. */
+            __asm__("" : "+r"(at));
+            int bit = (int)((at - (uintptr_t)digits) >> 2);
+            int limb = bit >> 6;
+            int offset = bit & 63;
+            window = s[limb] >> offset;
+            if (offset != 0 && limb < 4)
+                window |= s[limb + 1] << (64 - offset);
+            reload = out + 4 * (uintptr_t)(64 - w);
+        }
+        if ((window & 1) == carry)
+        {
+            window >>= 1;
+            out += 4;
             continue;
         }
-        int now = len - bit < w ? len - bit : w;
-        int limb = bit >> 6;
-        int offset = bit & 63;
-        uint64_t bits = s[limb] >> offset;
-        if (offset + now > 64)
-            bits |= s[limb + 1] << (64 - offset);
-        int32_t word = (int32_t)(bits & ((1u << now) - 1)) + (int32_t)carry;
+        /* Keeps the digit work below from running ahead of the test above. */
+        __asm__("" : "+r"(window));
+        int32_t word = (int32_t)(window & mask) + (int32_t)carry;
         carry = ((uint32_t)word >> (w - 1)) & 1;
-        word -= (int32_t)(carry << w);
-        digits[4 * bit] = (int8_t)word;
-        bit += now;
+        *(int8_t *)out = (int8_t)(word - (int32_t)(carry << w));
+        window >>= w;
+        out += 4 * (uintptr_t)w;
     }
 }
 
-/* acc += table entry |digit| (negated when the signs disagree), with acc's
- * infinity tracked in *infinity. */
-static void add_term(secp256k1_point *acc, int *infinity, const secp256k1_point *table, int digit, int negate)
+/* acc += digit * the table's base, from the entry |digit| of the table of
+ * odd multiples or of its negation, with acc's infinity tracked in *infinity. */
+static void add_term(secp256k1_point *acc, int *infinity, const secp256k1_point *positive,
+                     const secp256k1_point *negative, int digit)
 {
-    const secp256k1_point *q;
-    secp256k1_point negated;
-    if (digit < 0)
-    {
-        digit = -digit;
-        negate = !negate;
-    }
-    q = &table[digit >> 1];
-    if (negate)
-    {
-        copy4(negated.x, q->x);
-        sub_borrow(negated.y, FIELD_P, q->y);
-        q = &negated;
-    }
+    const secp256k1_point *q = digit < 0 ? &negative[-digit >> 1] : &positive[digit >> 1];
 
     if (*infinity)
     {
@@ -438,6 +445,7 @@ int zkvm_secp256k1_ecrecover(const uint8_t *msg, const uint8_t *sig, uint8_t rec
      * here can meet equal x: jR = +-2R would need (j -+ 2)R = 0, and R has
      * prime order n. */
     secp256k1_point r_table[R_ENTRIES], lambda_r_table[R_ENTRIES];
+    secp256k1_point neg_r_table[R_ENTRIES], neg_lambda_r_table[R_ENTRIES];
     secp256k1_point twice_r = point_r;
     sp1_secp256k1_double(&twice_r);
     r_table[0] = point_r;
@@ -450,6 +458,29 @@ int zkvm_secp256k1_ecrecover(const uint8_t *msg, const uint8_t *sig, uint8_t rec
     {
         lambda_r_table[i] = r_table[i];
         sp1_uint256_mulmod(lambda_r_table[i].x, &BETA_MOD_P);
+        copy4(neg_r_table[i].x, r_table[i].x);
+        sub_borrow(neg_r_table[i].y, FIELD_P, r_table[i].y);
+        copy4(neg_lambda_r_table[i].x, lambda_r_table[i].x);
+        copy4(neg_lambda_r_table[i].y, neg_r_table[i].y);
+    }
+
+    /* A negative scalar part takes its digits from the other table. Each
+     * table of a pair is the other's negation, so a term never negates a
+     * point itself. */
+    const secp256k1_point *tables[4][2] = {
+        {SECP256K1_G_TABLE, SECP256K1_NEG_G_TABLE},
+        {SECP256K1_LAMBDA_G_TABLE, SECP256K1_NEG_LAMBDA_G_TABLE},
+        {r_table, neg_r_table},
+        {lambda_r_table, neg_lambda_r_table},
+    };
+    for (int i = 0; i < 4; i++)
+    {
+        if (negative[i])
+        {
+            const secp256k1_point *t = tables[i][0];
+            tables[i][0] = tables[i][1];
+            tables[i][1] = t;
+        }
     }
 
     int length = 0;
@@ -481,13 +512,13 @@ int zkvm_secp256k1_ecrecover(const uint8_t *msg, const uint8_t *sig, uint8_t rec
         if (d == 0)
             continue;
         if ((int8_t)d)
-            add_term(&acc, &infinity, SECP256K1_G_TABLE, (int8_t)d, negative[0]);
+            add_term(&acc, &infinity, tables[0][0], tables[0][1], (int8_t)d);
         if ((int8_t)(d >> 8))
-            add_term(&acc, &infinity, SECP256K1_LAMBDA_G_TABLE, (int8_t)(d >> 8), negative[1]);
+            add_term(&acc, &infinity, tables[1][0], tables[1][1], (int8_t)(d >> 8));
         if ((int8_t)(d >> 16))
-            add_term(&acc, &infinity, r_table, (int8_t)(d >> 16), negative[2]);
+            add_term(&acc, &infinity, tables[2][0], tables[2][1], (int8_t)(d >> 16));
         if ((int8_t)(d >> 24))
-            add_term(&acc, &infinity, lambda_r_table, (int8_t)(d >> 24), negative[3]);
+            add_term(&acc, &infinity, tables[3][0], tables[3][1], (int8_t)(d >> 24));
     }
 
     if (infinity)
