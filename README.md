@@ -8,19 +8,41 @@ guests built with `--libc sp1`, providing the native half of
 
 ## What this is
 
-`libsp1.a` — three layers in one archive:
+`libsp1.a` — five layers in one archive:
 
 1. **SP1's own zkEVM SDK.** SP1 ships a complete implementation of the
    [eth-act zkVM accelerator standard](https://github.com/eth-act/zkvm-standards)
    (sources under `sp1/zkevm/`, published as the `zkevm-sdk-<version>.tar.gz`
-   release asset). 18 of the 19 accelerator entry points plus `read_input` /
+   release asset). 13 of the 19 accelerator entry points plus `read_input` /
    `write_output` come straight from there.
 2. **`zkvm_secp256k1_ecrecover`** (`src/secp256k1`) — replaces the SDK's,
    which spends ~512 point doublings and ~256 additions per recovery. This one
    uses GLV and wNAF for ~128 and ~78, with identical results; every
    transaction sender goes through it. Tested on the host against a Python
    reference (`tests/secp256k1`) and on SP1 itself in CI.
-3. **Raw precompile shims** (`src/sp1_syscalls`) — one three-instruction leaf
+3. **`zkvm_modexp`, `zkvm_bn254_g1_add` and `zkvm_bn254_g1_mul`**
+   (`src/modexp`, `src/bn254`) — replace the SDK's, which run modexp in
+   32-bit-limb software and BN254 G1 on the field precompiles alone. Moduli up
+   to 256 bits go through UINT256_MUL with a 4-bit window (326 calls for a
+   BN254 field inversion); wider ones still reach the SDK. G1 runs on the
+   BN254_ADD/BN254_DOUBLE point precompiles, the multiplication with GLV and
+   wNAF (~125 doublings, ~49 additions). On mainnet blocks that verify zk
+   proofs this is -72..-78% of all cycles. Tested on the host against a Python
+   reference (`tests/modexp`, `tests/bn254`) and on SP1 itself in CI.
+4. **`zkvm_bn254_pairing` and `zkvm_kzg_point_eval`** (`src/pairing`) — replace
+   the SDK's, whose curve crates reach the field precompiles one element at a
+   time and copy every operand in and out. One Fp2/Fp6/Fp12 tower
+   (`tower.h`) runs both curves on the BN254_FP2 and BLS12_381_FP2
+   precompiles: sparse line products, a shared Miller loop over signed
+   digits, cyclotomic squaring in the final exponentiation, and the fast
+   subgroup checks (pi(Q) = [6x^2]Q on BN254 G2, phi(P) = -[x^2]P on
+   BLS12-381 G1). KZG moves its G2 scalar multiplication into G1 so both G2
+   points are constants. A two-pair pairing is -59% cycles / -40% gas, a
+   point evaluation -75% / -66%. `model.py` is the integer reference the C
+   follows and `gen_constants.py` derives every constant from it; tested on
+   the host against py_ecc, go-ethereum's vectors and the official
+   `verify_kzg_proof` suite (`tests/pairing`, `tests/kzg`), and on SP1 in CI.
+5. **Raw precompile shims** (`src/sp1_syscalls`) — one three-instruction leaf
    per SP1 syscall, for anything the standard does not cover or that managed
    code wants to reach directly.
 
