@@ -49,27 +49,6 @@ sp1_start_ptr:
 sp1_halt_ptr:
     .dword zkvm_halt
 
-/* Nethermind's KeccakHash reaches the permutation through
- * Accelerators.KeccakF, whose binding is named for ziskos: syscall_keccak_f.
- * SP1 spells the same operation zkvm_keccak_permute and OpenVM zkvm_keccakf -
- * the eth-act standard covers zkvm_keccak256 and defines no permutation at
- * all, so the name was never agreed on. Rather than make the managed side
- * target-aware, each target's entry-point module carries a tail call under
- * the name the binding uses.
- *
- * In its own section on purpose: --gc-sections then drops it, and the
- * reference to the bindings library with it, in a guest built without
- * --extlib. The ABI is identical everywhere - a0 points at the 25 u64 state
- * words - so this is a jump, not a thunk. */
-.section .text.syscall_keccak_f,"ax",@progbits
-.global syscall_keccak_f
-.type   syscall_keccak_f, @function
-syscall_keccak_f:
-    .cfi_startproc
-    tail    zkvm_keccak_permute
-    .cfi_endproc
-    .size   syscall_keccak_f, .-syscall_keccak_f
-
 /* ------------------------------------------------------------------------
  * The platform interface of bflat's modules (docs/manifest.md in
  * bflat-riscv64, "Platform interface"). bflat's pal calls these; it holds no
