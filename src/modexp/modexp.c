@@ -63,44 +63,50 @@ static void reduce(uint64_t r[4], const uint8_t *b, size_t len, const uint64_t m
     }
 }
 
-static void square(uint64_t acc[4], mulmod_operand *scratch)
+/* acc->y = acc->y^2 mod acc->m. The precompile reads its second operand one
+ * clock before it reads and writes the first, so the two may be the same
+ * words: holding the accumulator next to its modulus spares a copy of it into
+ * a separate operand before every squaring. */
+static void square(mulmod_operand *acc)
 {
-    copy4(scratch->y, acc);
-    sp1_uint256_mulmod(acc, scratch);
+    sp1_uint256_mulmod(acc->y, acc);
 }
 
 /* acc = base^e mod m, e big-endian with a non-zero first byte. */
 static void pow_binary(uint64_t acc[4], const uint64_t base[4], const uint8_t *e, size_t len, const uint64_t m[4])
 {
-    mulmod_operand multiplier, scratch;
+    mulmod_operand multiplier, state;
     copy4(multiplier.y, base);
     copy4(multiplier.m, m);
-    copy4(scratch.m, m);
+    copy4(state.m, m);
     int started = 0;
     for (size_t i = 0; i < len; i++)
     {
         for (int bit = 7; bit >= 0; bit--)
         {
             if (started)
-                square(acc, &scratch);
+                square(&state);
             if ((e[i] >> bit) & 1)
             {
                 if (started)
-                    sp1_uint256_mulmod(acc, &multiplier);
+                    sp1_uint256_mulmod(state.y, &multiplier);
                 else
                 {
-                    copy4(acc, base);
+                    copy4(state.y, base);
                     started = 1;
                 }
             }
         }
     }
+    copy4(acc, state.y);
 }
 
 /* acc = base^e mod m, e big-endian with a non-zero first byte. */
 static void pow_window(uint64_t acc[4], const uint64_t base[4], const uint8_t *e, size_t len, const uint64_t m[4])
 {
-    mulmod_operand table[WINDOW_ENTRIES], scratch;
+    mulmod_operand table[WINDOW_ENTRIES];
+    /* A zero digit skips multiplication, so its slot can hold the accumulator. */
+    mulmod_operand *state = &table[0];
     copy4(table[1].y, base);
     copy4(table[1].m, m);
     for (int i = 2; i < WINDOW_ENTRIES; i++)
@@ -109,7 +115,7 @@ static void pow_window(uint64_t acc[4], const uint64_t base[4], const uint8_t *e
         sp1_uint256_mulmod(table[i].y, &table[1]);
         copy4(table[i].m, m);
     }
-    copy4(scratch.m, m);
+    copy4(state->m, m);
 
     int started = 0;
     for (size_t i = 0; i < 2 * len; i++)
@@ -118,16 +124,17 @@ static void pow_window(uint64_t acc[4], const uint64_t base[4], const uint8_t *e
         if (started)
         {
             for (int j = 0; j < WINDOW_BITS; j++)
-                square(acc, &scratch);
+                square(state);
             if (digit)
-                sp1_uint256_mulmod(acc, &table[digit]);
+                sp1_uint256_mulmod(state->y, &table[digit]);
         }
         else if (digit)
         {
-            copy4(acc, table[digit].y);
+            copy4(state->y, table[digit].y);
             started = 1;
         }
     }
+    copy4(acc, state->y);
 }
 
 int zkvm_modexp(const uint8_t *base, size_t base_len, const uint8_t *exp, size_t exp_len,
