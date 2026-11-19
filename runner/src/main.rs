@@ -13,7 +13,9 @@ fn main() {
     let mut stdin = SP1Stdin::new();
     stdin.write_vec(input);
 
-    let client = ProverClient::builder().cpu().build();
+    // The light prover only executes: the CPU one also builds the local proving
+    // node first, which costs more than executing most blocks.
+    let client = ProverClient::builder().light().build();
     let (public_values, report) = match client.execute(elf, stdin).run() {
         Ok(v) => v,
         Err(e) => {
